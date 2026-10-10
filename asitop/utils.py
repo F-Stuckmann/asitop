@@ -8,31 +8,36 @@ import plistlib
 
 
 def parse_powermetrics(path='/tmp/asitop_powermetrics', timecode="0"):
-    data = None
     try:
         with open(path+timecode, 'rb') as fp:
-            data = fp.read()
-        data = data.split(b'\x00')
-        powermetrics_parse = plistlib.loads(data[-1])
-        thermal_pressure = parse_thermal_pressure(powermetrics_parse)
-        cpu_metrics_dict = parse_cpu_metrics(powermetrics_parse)
-        gpu_metrics_dict = parse_gpu_metrics(powermetrics_parse)
-        #bandwidth_metrics = parse_bandwidth_metrics(powermetrics_parse)
-        bandwidth_metrics = None
-        timestamp = powermetrics_parse["timestamp"]
-        return cpu_metrics_dict, gpu_metrics_dict, thermal_pressure, bandwidth_metrics, timestamp
-    except Exception as e:
-        if data:
-            if len(data) > 1:
-                powermetrics_parse = plistlib.loads(data[-2])
-                thermal_pressure = parse_thermal_pressure(powermetrics_parse)
-                cpu_metrics_dict = parse_cpu_metrics(powermetrics_parse)
-                gpu_metrics_dict = parse_gpu_metrics(powermetrics_parse)
-                #bandwidth_metrics = parse_bandwidth_metrics(powermetrics_parse)
-                bandwidth_metrics = None
-                timestamp = powermetrics_parse["timestamp"]
-                return cpu_metrics_dict, gpu_metrics_dict, thermal_pressure, bandwidth_metrics, timestamp
+            fp.seek(0, os.SEEK_END)
+            position = fp.tell()
+            chunks = []
+            separators = 0
+            # Two separators retain a complete sample during a partial write.
+            while position > 0 and separators < 2:
+                size = min(65536, position)
+                position -= size
+                fp.seek(position)
+                chunk = fp.read(size)
+                chunks.append(chunk)
+                separators += chunk.count(b'\x00')
+            data = b''.join(reversed(chunks))
+    except Exception:
         return False
+
+    for segment in reversed(data.split(b'\x00')[-2:]):
+        try:
+            powermetrics_parse = plistlib.loads(segment)
+            thermal_pressure = parse_thermal_pressure(powermetrics_parse)
+            cpu_metrics_dict = parse_cpu_metrics(powermetrics_parse)
+            gpu_metrics_dict = parse_gpu_metrics(powermetrics_parse)
+            timestamp = powermetrics_parse["timestamp"]
+            return cpu_metrics_dict, gpu_metrics_dict, thermal_pressure, None, timestamp
+        except Exception:
+            continue
+    return False
+
 
 
 def clear_console():

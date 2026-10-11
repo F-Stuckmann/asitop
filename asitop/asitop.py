@@ -1,8 +1,16 @@
 import argparse
 import time
+import curses
+import os
+import re
+import shutil
+import sys
+
+from blessed import Terminal
 from collections import deque
 
-from dashing import HChart, HGauge, HSplit, VGauge, VSplit
+from dashing import HChart as _HChart, HGauge as _HGauge, HSplit as _HSplit
+from dashing import VGauge as _VGauge, VSplit as _VSplit
 
 from .utils import (
     clear_console,
@@ -14,18 +22,114 @@ from .utils import (
     terminate_powermetrics_process,
 )
 
-parser = argparse.ArgumentParser(
-    description='asitop: Performance monitoring CLI tool for Apple Silicon')
-parser.add_argument('--interval', type=int, default=1,
-                    help='Display interval and sampling interval for powermetrics (seconds)')
-parser.add_argument('--color', type=int, default=2,
-                    help='Choose display color (0~8)')
-parser.add_argument('--avg', type=int, default=30,
-                    help='Interval for averaged values (seconds)')
-parser.add_argument('--show_cores', type=bool, default=False,
-                    help='Choose show cores mode')
-parser.add_argument('--max_count', type=int, default=0,
-                    help='Max show count to restart powermetrics')
+def parse_boolean(value):
+    values = {"0": False, "1": True, "false": False, "true": True}
+    try:
+        return values[value.lower()]
+    except KeyError:
+        raise argparse.ArgumentTypeError("expected 0, 1, false or true")
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        description="asitop: Performance monitoring CLI tool for Apple Silicon")
+    parser.add_argument("--interval", type=int, default=1,
+                        help="Display and sampling interval in seconds (positive)")
+    parser.add_argument("--color", type=int, default=2, choices=range(9),
+                        help="Display color (0~8)")
+    parser.add_argument("--avg", type=int, default=30,
+                        help="Averaging window in seconds (at least interval)")
+    parser.add_argument("--show_cores", type=parse_boolean, nargs="?", const=True, default=False,
+                        help="Show individual cores; accepts 0/1/false/true")
+    parser.add_argument("--max_count", type=int, default=0,
+                        help="Restart collector after this many display cycles; 0 disables")
+    return parser
+
+
+_text_terminal = Terminal(kind="dumb")
+
+
+def clip_text(text, width):
+    text = safe_label(text)
+    width = max(0, width)
+    if _text_terminal.length(text) <= width:
+        return text
+    if width <= 3:
+        return _text_terminal.truncate(text, width)
+    return _text_terminal.truncate(text, width - 3) + "..."
+
+
+class _ClippedTitle:
+    def _draw_title(self, tbox, fill_all_width):
+        title = clip_text(self.title or "", max(0, tbox.w - 2))
+        if not title:
+            return
+        length = _text_terminal.length(title)
+        margin = max(0, (tbox.w - length) // 20)
+        color = "" if self.border_color is None else tbox.t.color(self.border_color)
+        if fill_all_width:
+            title = " " * margin + title + " " * max(0, tbox.w - margin - length)
+            print(tbox.t.move(tbox.x, tbox.y) + color + title)
+        else:
+            print(tbox.t.move(tbox.x, tbox.y + margin) + color + " " * margin + title + " " * margin)
+
+
+class HGauge(_ClippedTitle, _HGauge):
+    pass
+
+
+class VGauge(_ClippedTitle, _VGauge):
+    pass
+
+
+class HChart(_ClippedTitle, _HChart):
+    pass
+
+
+class HSplit(_ClippedTitle, _HSplit):
+    pass
+
+
+class VSplit(_ClippedTitle, _VSplit):
+    pass
+
+
+def resolve_terminal_kind(kind=None, setupterm=None):
+    setupterm = setupterm or curses.setupterm
+    kind = os.environ.get("TERM", "") if kind is None else kind
+    kind = {"xterm-ghossty": "xterm-ghostty"}.get(kind, kind)
+    candidates = [kind] if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9+_.-]{0,79}", kind) else []
+    candidates.extend(["xterm-256color", "xterm", "ansi", "vt100"])
+    for candidate in dict.fromkeys(candidates):
+        try:
+            setupterm(candidate)
+            return candidate
+        except (curses.error, OSError):
+            continue
+    return None
+
+
+def build_terminal():
+    if not sys.stdout.isatty():
+        return Terminal(kind="dumb"), None
+    kind = resolve_terminal_kind()
+    return (Terminal(kind=kind, force_styling=True), kind) if kind else (Terminal(kind="dumb"), None)
+
+
+def display_dashboard(ui, terminal):
+    width, height = shutil.get_terminal_size(fallback=(80, 24))
+    if not terminal.does_styling or width < 40 or height < 12:
+        lines = []
+        def collect(tile):
+            if tile.title:
+                lines.append(clip_text(tile.title, width))
+            for child in getattr(tile, "items", []):
+                collect(child)
+        collect(ui)
+        print("\n".join(lines[:max(1, height - 1)]), flush=True)
+    else:
+        ui._terminal = terminal
+        ui.display()
 
 
 def _horizontal_split(widgets):
@@ -132,7 +236,14 @@ def _wait_for_reading(session, wait=0.1):
 
 
 def main(argv=None):
+    parser = build_parser()
     args = parser.parse_args(argv)
+    if args.interval <= 0:
+        parser.error("--interval must be positive")
+    if args.avg <= 0 or args.avg < args.interval:
+        parser.error("--avg must be positive and at least --interval")
+    if args.max_count < 0:
+        parser.error("--max_count must be nonnegative")
     sessions = []
     try:
         return _main(args, sessions)
@@ -144,16 +255,23 @@ def main(argv=None):
             if sessions:
                 terminate_powermetrics_process(sessions[-1])
         finally:
-            print("\033[?25h", end="", flush=True)
+            if sys.stdout.isatty():
+                print("\033[?25h", end="", flush=True)
 
 
 def _main(args, sessions):
     print("\nASITOP - Performance monitoring CLI tool for Apple Silicon")
     print("You can update ASITOP by running `pip install --upgrade git+https://github.com/F-Stuckmann/asitop.git`")
     print("Get help at `https://github.com/F-Stuckmann/asitop`")
-    print("P.S. You are recommended to run ASITOP with `sudo asitop`\n")
+    print("P.S. Prefer `asitop`; only powermetrics requires sudo.\n")
     print("\n[1/3] Loading ASITOP\n")
-    print("\033[?25l")
+    terminal, terminal_kind = build_terminal()
+    if terminal_kind and terminal_kind != os.environ.get("TERM"):
+        print(f"Terminal fallback: {safe_label(os.environ.get('TERM', ''))} -> {terminal_kind}")
+    if sys.stdout.isatty():
+        print("\033[?25l")
+    width, height = shutil.get_terminal_size(fallback=(80, 24))
+    args.show_cores = args.show_cores and width >= 100 and height >= 28
 
     soc_info_dict = get_soc_info()
 
@@ -240,7 +358,8 @@ def _main(args, sessions):
     avg_cpu_power_list = deque([], maxlen=int(args.avg / args.interval))
     avg_gpu_power_list = deque([], maxlen=int(args.avg / args.interval))
 
-    clear_console()
+    if sys.stdout.isatty():
+        clear_console()
 
     count=0
     try:
@@ -284,7 +403,7 @@ def _main(args, sessions):
                     gpu_gauge.value = gpu_metrics_dict["active"]
 
                     ane_util_percent = int(
-                        cpu_metrics_dict["ane_W"] / args.interval / ane_max_power * 100)
+                        min(100, cpu_metrics_dict["ane_W"] / args.interval / ane_max_power * 100))
                     ane_gauge.title = "".join([
                         "ANE Usage: ",
                         str(ane_util_percent),
@@ -374,7 +493,7 @@ def _main(args, sessions):
                     ])
                     gpu_power_chart.append(gpu_power_percent)
 
-                    ui.display()
+                    display_dashboard(ui, terminal)
 
             time.sleep(args.interval)
 

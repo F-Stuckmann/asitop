@@ -261,8 +261,8 @@ def main(argv=None):
 
 def _main(args, sessions):
     print("\nASITOP - Performance monitoring CLI tool for Apple Silicon")
-    print("You can update ASITOP by running `pip install asitop --upgrade`")
-    print("Get help at `https://github.com/tlkh/asitop`")
+    print("You can update ASITOP by running `pip install --upgrade git+https://github.com/F-Stuckmann/asitop.git`")
+    print("Get help at `https://github.com/F-Stuckmann/asitop`")
     print("P.S. Prefer `asitop`; only powermetrics requires sudo.\n")
     print("\n[1/3] Loading ASITOP\n")
     terminal, terminal_kind = build_terminal()

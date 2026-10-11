@@ -89,9 +89,10 @@ class ResizeRenderingTests(unittest.TestCase):
                 for value in [10, 25, 90, 100] * 30:
                     chart.append(value)
                 history = list(chart.datapoints)
-                ui = app.VSplit(processor, app.VSplit(
-                    app.HGauge(title='RAM Usage', val=96),
-                    title='Memory', border_color=2),
+                memory, ram, allocation = app._build_memory_widgets(2)
+                ram.value = 96
+                app._update_gpu_memory(allocation, 3 * 2**30, 8 * 2**30)
+                ui = app.VSplit(processor, memory,
                     app.HSplit(chart, app.HChart(title='CPU Power'),
                                title='Power', border_color=2))
                 with patch.dict(os.environ, {'NO_COLOR': ''}):
@@ -118,3 +119,30 @@ class ResizeRenderingTests(unittest.TestCase):
                     self.assertEqual(differences, 0,
                                      f'{width}x{height}: {differences} stale cells after resize')
                     self.assertEqual(list(chart.datapoints), history)
+
+
+class MemoryAlignmentRenderingTests(unittest.TestCase):
+    def test_memory_numbers_align_on_rendered_terminal(self):
+        import pyte
+
+        for width in [83, 120, 200]:
+            for swap in [0, 8.0]:
+                with self.subTest(width=width, swap=swap):
+                    panel, ram, gpu = app._build_memory_widgets(2)
+                    app._update_ram_memory(ram, {
+                        'used_GB': 34.7, 'total_GB': 36.0, 'free_percent': 96,
+                        'swap_total_GB': swap, 'swap_used_GB': 7.0})
+                    app._update_gpu_memory(gpu, 3 * 2**30, 36 * 2**30)
+                    with patch.dict(os.environ, {'NO_COLOR': ''}):
+                        terminal = Terminal(kind='xterm-256color', force_styling=True)
+                    with patch.object(app.shutil, 'get_terminal_size', return_value=(width, 20)), \
+                         patch.object(Terminal, 'width', width), \
+                         patch.object(Terminal, 'height', 20), \
+                         patch.object(app.sys, 'stdout', io.StringIO()) as output:
+                        app.display_dashboard(panel, terminal)
+                    screen = pyte.Screen(width, 20)
+                    pyte.Stream(screen).feed(output.getvalue())
+                    ram_line = next(line for line in screen.display if 'RAM Usage:' in line)
+                    gpu_line = next(line for line in screen.display if 'GPU allocated:' in line)
+                    self.assertEqual(ram_line.index('/'), gpu_line.index('/'))
+                    self.assertEqual(ram_line.index('GiB'), gpu_line.index('GiB'))

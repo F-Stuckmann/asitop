@@ -16,6 +16,7 @@ from .utils import (
     clear_console,
     safe_label,
     get_ram_metrics_dict,
+    get_gpu_memory_bytes,
     get_soc_info,
     parse_powermetrics,
     run_powermetrics_process,
@@ -60,12 +61,15 @@ def clip_text(text, width):
 
 
 class _ClippedTitle:
+    title_indent = None
+
     def _draw_title(self, tbox, fill_all_width):
         title = clip_text(self.title or "", max(0, tbox.w - 2))
         if not title:
             return
         length = _text_terminal.length(title)
-        margin = max(0, (tbox.w - length) // 20)
+        margin = (self.title_indent if self.title_indent is not None
+                  else max(0, (tbox.w - length) // 20))
         color = "" if self.border_color is None else tbox.t.color(self.border_color)
         if fill_all_width:
             title = " " * margin + title + " " * max(0, tbox.w - margin - length)
@@ -76,6 +80,10 @@ class _ClippedTitle:
 
 class HGauge(_ClippedTitle, _HGauge):
     pass
+
+
+class _MemoryGauge(HGauge):
+    title_indent = 0
 
 
 class VGauge(_ClippedTitle, _VGauge):
@@ -92,6 +100,38 @@ class HSplit(_ClippedTitle, _HSplit):
 
 class VSplit(_ClippedTitle, _VSplit):
     pass
+
+
+def _build_memory_widgets(color):
+    ram = _MemoryGauge(title="RAM Usage", val=0, color=color)
+    gpu = _MemoryGauge(title="GPU allocated: N/A", val=0, color=color)
+    panel = VSplit(
+        ram, gpu, border_color=color,
+        title="Memory · shared RAM; values overlap",
+    )
+    return panel, ram, gpu
+
+
+def _memory_title(label, used, total):
+    return f"{label:<15}{used:5.1f}/{total:5.1f} GiB"
+
+
+def _update_ram_memory(gauge, metrics):
+    gauge.title = _memory_title("RAM Usage:", metrics["used_GB"], metrics["total_GB"])
+    if metrics["swap_total_GB"] < 0.1:
+        gauge.title += " - swap inactive"
+    else:
+        gauge.title += f" - swap:{metrics['swap_used_GB']}/{metrics['swap_total_GB']} GiB"
+    gauge.value = metrics["free_percent"]
+
+
+def _update_gpu_memory(gauge, allocated, total):
+    if allocated is None or total <= 0:
+        gauge.title = "GPU allocated: N/A"
+        gauge.value = 0
+    else:
+        gauge.value = min(100, allocated / total * 100)
+        gauge.title = _memory_title("GPU allocated:", allocated / 2**30, total / 2**30)
 
 
 def resolve_terminal_kind(kind=None, setupterm=None):
@@ -303,11 +343,8 @@ def _main(args, sessions):
         )
     )
 
-    ram_gauge = HGauge(title="RAM Usage", val=0, color=args.color)
-    memory_gauges = VSplit(
-        ram_gauge,
-        border_color=args.color,
-        title="Memory"
+    memory_gauges, ram_gauge, gpu_memory_gauge = (
+        _build_memory_widgets(args.color)
     )
 
     cpu_power_chart = HChart(title="CPU Power", color=args.color)
@@ -419,28 +456,11 @@ def _main(args, sessions):
 
                     ram_metrics_dict = get_ram_metrics_dict()
 
-                    if ram_metrics_dict["swap_total_GB"] < 0.1:
-                        ram_gauge.title = "".join([
-                            "RAM Usage: ",
-                            str(ram_metrics_dict["used_GB"]),
-                            "/",
-                            str(ram_metrics_dict["total_GB"]),
-                            "GB - swap inactive"
-                        ])
-                    else:
-                        ram_gauge.title = "".join([
-                            "RAM Usage: ",
-                            str(ram_metrics_dict["used_GB"]),
-                            "/",
-                            str(ram_metrics_dict["total_GB"]),
-                            "GB",
-                            " - swap:",
-                            str(ram_metrics_dict["swap_used_GB"]),
-                            "/",
-                            str(ram_metrics_dict["swap_total_GB"]),
-                            "GB"
-                        ])
-                    ram_gauge.value = ram_metrics_dict["free_percent"]
+                    _update_ram_memory(ram_gauge, ram_metrics_dict)
+                    _update_gpu_memory(
+                        gpu_memory_gauge,
+                        get_gpu_memory_bytes(), ram_metrics_dict["total_bytes"],
+                    )
 
 
                     package_power_W = cpu_metrics_dict["package_W"] / \

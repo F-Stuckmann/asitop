@@ -179,6 +179,7 @@ def get_ram_metrics_dict():
         swap_free_percent = None
     ram_metrics_dict = {
         "total_GB": round(total_GB, 1),
+        "total_bytes": ram_metrics.total,
         "free_GB": round(free_GB, 1),
         "used_GB": round(used_GB, 1),
         "free_percent": int(100-(ram_metrics.available/ram_metrics.total*100)),

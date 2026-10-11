@@ -20,6 +20,9 @@ A Python-based `nvtop`-inspired command line tool for Apple Silicon (aka M1) Mac
   * ANE utilization (measured by power)
 * Memory info:
   * RAM and swap, size and usage
+  * GPU allocated memory below overall RAM usage
+  * CPU and GPU share RAM; GPU allocations overlap total RAM usage. GPU
+    counters come from the accelerator driver and show N/A when unavailable.
   * (Apple removed memory bandwidth from `powermetrics`)
 * Power info:
   * CPU power, GPU power (Apple removed package power from `powermetrics`)
@@ -59,6 +62,10 @@ optional arguments:
 * CPU/GPU frequency
 * Package/CPU/GPU/ANE energy consumption
 * CPU/GPU/Media Total memory bandwidth via the DCS (DRAM Command Scheduler)
+
+GPU allocated memory comes from the accelerator driver’s `PerformanceStatistics`
+dictionary via `ioreg`. It overlaps overall RAM usage and is not GPU-exclusive
+physical memory. Both gauges use the same physical RAM capacity and display color.
 
 [`psutil`](https://github.com/giampaolo/psutil) is used to measure the following:
 

@@ -17,7 +17,8 @@ class LifecycleTests(unittest.TestCase):
             stack.enter_context(patch.object(app, 'get_soc_info', return_value={
                 'name': 'Apple M5', 'gpu_core_count': 20, 'cpu_max_power': 20, 'gpu_max_power': 20}))
             stack.enter_context(patch.object(app, 'get_ram_metrics_dict', return_value={
-                'used_GB': 1, 'total_GB': 8, 'free_percent': 12, 'swap_total_GB': 0}))
+                'used_GB': 1, 'total_GB': 8, 'total_bytes': 8 * 2**30, 'free_percent': 12, 'swap_total_GB': 0}))
+            stack.enter_context(patch.object(app, 'get_gpu_memory_bytes', return_value=None))
             stack.enter_context(patch.object(app, 'clear_console'))
             stack.enter_context(patch.object(app.time, 'sleep'))
             display = stack.enter_context(patch.object(app, 'display_dashboard', side_effect=failure))

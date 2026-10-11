@@ -8,6 +8,7 @@ from subprocess import PIPE
 import psutil
 from .parsers import *
 import plistlib
+from xml.parsers.expat import ExpatError
 
 
 def parse_powermetrics(path='/tmp/asitop_powermetrics', timecode="0"):
@@ -137,6 +138,30 @@ def terminate_powermetrics_process(session):
                 break
             time.sleep(0.05)
     raise RuntimeError("powermetrics cleanup failed; session files retained")
+
+
+def get_gpu_memory_bytes():
+    try:
+        raw = subprocess.check_output(
+            ['/usr/sbin/ioreg', '-a', '-r', '-c', 'IOAccelerator', '-d', '1'],
+            timeout=1, stderr=subprocess.DEVNULL,
+        )
+        nodes = plistlib.loads(raw)
+    except (OSError, subprocess.SubprocessError, ValueError,
+            plistlib.InvalidFileException, ExpatError):
+        return None
+    if not isinstance(nodes, list):
+        return None
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        stats = node.get('PerformanceStatistics', {})
+        if not isinstance(stats, dict):
+            continue
+        allocated = stats.get('Alloc system memory')
+        if type(allocated) is int and allocated >= 0:
+            return allocated
+    return None
 
 
 def get_ram_metrics_dict():

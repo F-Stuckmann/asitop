@@ -118,6 +118,9 @@ def build_terminal():
 
 def display_dashboard(ui, terminal):
     width, height = shutil.get_terminal_size(fallback=(80, 24))
+    if terminal.does_styling:
+        # Dashing leaves split remainders untouched, including cells from old layouts.
+        print(terminal.clear + terminal.home, end="")
     if not terminal.does_styling or width < 40 or height < 12:
         lines = []
         def collect(tile):

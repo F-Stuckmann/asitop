@@ -62,7 +62,7 @@ class TerminalTests(unittest.TestCase):
             with self.subTest(width=width, height=height):
                 ui, gauges, cores, gpu, ane = app._build_processor_widgets(groups, 2, False)
                 app._update_processor_widgets(groups, gauges, cores, False)
-                terminal = Mock(width=width, height=height)
+                terminal = Mock(width=width, height=height, clear='', home='')
                 terminal.move.return_value = ''
                 terminal.color.return_value = ''
                 ui._terminal = terminal
@@ -70,3 +70,51 @@ class TerminalTests(unittest.TestCase):
                     app.display_dashboard(ui, terminal)
                 self.assertNotIn('\x1b', output.getvalue())
                 self.assertTrue(all(Terminal(kind='dumb').length(line) <= width for line in output.getvalue().splitlines()))
+
+
+class ResizeRenderingTests(unittest.TestCase):
+    def test_resized_screen_matches_fresh_render_and_preserves_history(self):
+        import pyte
+
+        groups = [{'family': 'E', 'label': 'E-CPU', 'core_count': 1,
+                   'active': 44, 'freq_Mhz': 2169,
+                   'cores': [{'id': 0, 'active': 44, 'freq_Mhz': 2169}]}]
+        for show_cores in [False, True]:
+            with self.subTest(show_cores=show_cores):
+                processor, gauges, cores, gpu, ane = app._build_processor_widgets(
+                    groups, 2, show_cores)
+                app._update_processor_widgets(groups, gauges, cores, show_cores)
+                gpu.value = 100
+                chart = app.HChart(title='GPU Power', color=2)
+                for value in [10, 25, 90, 100] * 30:
+                    chart.append(value)
+                history = list(chart.datapoints)
+                ui = app.VSplit(processor, app.VSplit(
+                    app.HGauge(title='RAM Usage', val=96),
+                    title='Memory', border_color=2),
+                    app.HSplit(chart, app.HChart(title='CPU Power'),
+                               title='Power', border_color=2))
+                with patch.dict(os.environ, {'NO_COLOR': ''}):
+                    terminal = Terminal(kind='xterm-256color', force_styling=True)
+                self.assertTrue(terminal.does_styling)
+                screen = pyte.Screen(120, 40)
+                stream = pyte.Stream(screen)
+                # Resize the same screen and reuse the same widgets, including history.
+                for width, height in [(120, 40), (83, 25), (140, 47),
+                                      (20, 5), (100, 28), (99, 28), (120, 40)]:
+                    screen.resize(lines=height, columns=width)
+                    with patch.object(app.shutil, 'get_terminal_size',
+                                      return_value=(width, height)), \
+                         patch.object(Terminal, 'width', width), \
+                         patch.object(Terminal, 'height', height), \
+                         patch.object(app.sys, 'stdout', io.StringIO()) as output:
+                        app.display_dashboard(ui, terminal)
+                        frame = output.getvalue()
+                    stream.feed(frame)
+                    fresh = pyte.Screen(width, height)
+                    pyte.Stream(fresh).feed(frame)
+                    differences = sum(a != b for old, new in zip(screen.display, fresh.display)
+                                      for a, b in zip(old, new))
+                    self.assertEqual(differences, 0,
+                                     f'{width}x{height}: {differences} stale cells after resize')
+                    self.assertEqual(list(chart.datapoints), history)

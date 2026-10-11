@@ -1,0 +1,24 @@
+name: Fork banner verification
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install . build
+      - run: python -m unittest discover -s tests -v
+      - run: python -m compileall -q asitop tests
+      - run: python -m asitop.asitop --help
+      - run: git diff --check
+      - run: python -m build --wheel
+      - name: Verify installed package outside checkout
+        run: |
+          python -m venv /tmp/asitop-wheel
+          /tmp/asitop-wheel/bin/python -m pip install dist/*.whl
+          cd /tmp
+          /tmp/asitop-wheel/bin/asitop --help
+          /tmp/asitop-wheel/bin/python -m asitop.asitop --help
+          /tmp/asitop-wheel/bin/python -m unittest discover -s "$GITHUB_WORKSPACE/tests" -p test_fork_links.py -v

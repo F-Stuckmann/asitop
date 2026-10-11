@@ -1,5 +1,8 @@
 import os
-import glob
+import signal
+import tempfile
+import time
+from dataclasses import dataclass
 import subprocess
 from subprocess import PIPE
 import psutil
@@ -41,33 +44,99 @@ def parse_powermetrics(path='/tmp/asitop_powermetrics', timecode="0"):
 
 
 def clear_console():
-    command = 'clear'
-    os.system(command)
+    print("\033[2J\033[H", end="", flush=True)
+
+
+def safe_label(value):
+    return "".join(c for c in str(value) if c.isprintable())
 
 
 def convert_to_GB(value):
     return round(value/1024/1024/1024, 1)
 
 
-def run_powermetrics_process(timecode, nice=10, interval=1000):
-    #ver, *_ = platform.mac_ver()
-    #major_ver = int(ver.split(".")[0])
-    for tmpf in glob.glob("/tmp/asitop_powermetrics*"):
-        os.remove(tmpf)
-    output_file_flag = "-o"
-    command = " ".join([
-        "sudo nice -n",
-        str(nice),
-        "powermetrics",
-        "--samplers cpu_power,gpu_power,thermal",
-        output_file_flag,
-        "/tmp/asitop_powermetrics"+timecode,
-        "-f plist",
-        "-i",
-        str(interval)
+@dataclass
+class Collector:
+    process: subprocess.Popen
+    directory: str
+    log_path: str
+    cleaned: bool = False
+
+    @property
+    def pid(self):
+        return self.process.pid
+
+    def poll(self):
+        return self.process.poll()
+
+
+def run_powermetrics_process(timecode=None, nice=10, interval=1000):
+    directory = tempfile.mkdtemp(prefix="asitop-")
+    log_path = os.path.join(directory, "powermetrics.plist")
+    command = [] if os.geteuid() == 0 else ["/usr/bin/sudo"]
+    command.extend([
+        "/usr/bin/nice", "-n", str(int(nice)), "/usr/bin/powermetrics",
+        "--samplers", "cpu_power,gpu_power,thermal", "-f", "plist",
+        "-i", str(int(interval)),
     ])
-    process = subprocess.Popen(command.split(" "), stdin=PIPE, stdout=PIPE)
-    return process
+    try:
+        descriptor = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "wb") as output:
+            process = subprocess.Popen(command, stdout=output, start_new_session=True)
+        return Collector(process, directory, log_path)
+    except BaseException:
+        if os.path.exists(log_path):
+            os.unlink(log_path)
+        os.rmdir(directory)
+        raise
+
+
+def _signal_collector(session, sig):
+    try:
+        os.killpg(session.pid, sig)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        try:
+            subprocess.run([
+                "/usr/bin/sudo", "-n", "/bin/kill", "-" + str(int(sig)),
+                "--", "-" + str(session.pid),
+            ], check=True, timeout=3)
+        except (OSError, subprocess.SubprocessError) as error:
+            raise RuntimeError("powermetrics cleanup failed; session files retained") from error
+
+
+def _group_exists(pid):
+    try:
+        os.killpg(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def terminate_powermetrics_process(session):
+    if session is None or session.cleaned:
+        return
+    # A exited leader can still have live children in its owned group.
+    _signal_collector(session, signal.SIGTERM)
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        if sig == signal.SIGKILL:
+            _signal_collector(session, sig)
+        deadline = time.monotonic() + 3
+        while True:
+            session.poll()
+            if not _group_exists(session.pid):
+                session.process.wait(timeout=3)
+                os.unlink(session.log_path)
+                os.rmdir(session.directory)
+                session.cleaned = True
+                return
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.05)
+    raise RuntimeError("powermetrics cleanup failed; session files retained")
 
 
 def get_ram_metrics_dict():
@@ -97,7 +166,7 @@ def get_ram_metrics_dict():
 
 
 def get_cpu_info():
-    cpu_info = os.popen('sysctl -a | grep machdep.cpu').read()
+    cpu_info = subprocess.check_output(['/usr/sbin/sysctl', '-a'], text=True)
     cpu_info_lines = cpu_info.split("\n")
     data_fields = ["machdep.cpu.brand_string", "machdep.cpu.core_count"]
     cpu_info_dict = {}
@@ -110,7 +179,7 @@ def get_cpu_info():
 
 
 def get_core_counts():
-    cores_info = os.popen('sysctl -a | grep hw.perflevel').read()
+    cores_info = subprocess.check_output(['/usr/sbin/sysctl', '-a'], text=True)
     cores_info_lines = cores_info.split("\n")
     data_fields = ["hw.perflevel0.logicalcpu", "hw.perflevel1.logicalcpu"]
     cores_info_dict = {}
@@ -124,9 +193,8 @@ def get_core_counts():
 
 def get_gpu_cores():
     try:
-        cores = os.popen(
-            "system_profiler -detailLevel basic SPDisplaysDataType | grep 'Total Number of Cores'").read()
-        cores = int(cores.split(": ")[-1])
+        cores = subprocess.check_output(['/usr/sbin/system_profiler', '-detailLevel', 'basic', 'SPDisplaysDataType'], text=True)
+        cores = int(next(line for line in cores.splitlines() if "Total Number of Cores" in line).split(":")[-1])
     except:
         cores = "?"
     return cores

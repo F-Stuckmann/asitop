@@ -41,7 +41,7 @@ def reading(**kwargs):
          'cpus': [{'cpu': 0, 'active_ratio': .25}]},
         {'name': 'S-Cluster', 'active_ratio': .5, 'freq_hz': 4e9,
          'cpus': [{'cpu': 1, 'active_ratio': .5}]},
-    ], 'cpu_energy': counter * 1000, 'gpu_energy': 500, 'ane_energy': 0}})
+    ], 'cpu_energy': counter * 1000, 'gpu_energy': 500, 'ane_energy': float(os.environ.get('ASITOP_ANE_ENERGY', '0'))}})
     return cpu, parse_gpu_metrics({'gpu': {}}), 'Nominal', None, counter
 
 

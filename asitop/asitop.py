@@ -403,7 +403,7 @@ def _main(args, sessions):
                     gpu_gauge.value = gpu_metrics_dict["active"]
 
                     ane_util_percent = int(
-                        cpu_metrics_dict["ane_W"] / args.interval / ane_max_power * 100)
+                        min(100, cpu_metrics_dict["ane_W"] / args.interval / ane_max_power * 100))
                     ane_gauge.title = "".join([
                         "ANE Usage: ",
                         str(ane_util_percent),

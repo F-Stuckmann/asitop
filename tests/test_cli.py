@@ -113,3 +113,10 @@ class EntryPointTests(unittest.TestCase):
             self.assertIn('P-CPU Usage: 25%', result.stdout)
             self.assertIn('S-CPU Usage: 50%', result.stdout)
             self.assertEqual(events[-1]['event'], 'cleanup')
+
+    def test_high_ane_power_keeps_utilization_gauge_within_its_display(self):
+        result, events = self.execute([], 'module', extra_env={'ASITOP_ANE_ENERGY': '160000'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        ane = [w for e in events if e['event'] == 'display' for w in e['widgets'] if (w['title'] or '').startswith('ANE Usage:')]
+        self.assertEqual(ane[0]['value'], 100)
+        self.assertIn('160.0 W', ane[0]['title'])

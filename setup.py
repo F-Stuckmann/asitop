@@ -26,6 +26,7 @@ setup(
     keywords='asitop',
     install_requires=[
         "dashing",
+        "blessed>=1.50",
         "psutil",
     ],
     zip_safe=False

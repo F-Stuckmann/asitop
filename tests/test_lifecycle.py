@@ -20,7 +20,7 @@ class LifecycleTests(unittest.TestCase):
                 'used_GB': 1, 'total_GB': 8, 'free_percent': 12, 'swap_total_GB': 0}))
             stack.enter_context(patch.object(app, 'clear_console'))
             stack.enter_context(patch.object(app.time, 'sleep'))
-            display = stack.enter_context(patch.object(app.VSplit, 'display', side_effect=failure))
+            display = stack.enter_context(patch.object(app, 'display_dashboard', side_effect=failure))
             if failure:
                 with self.assertRaisesRegex(RuntimeError, 'render'):
                     app.main(argv or [])

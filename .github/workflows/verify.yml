@@ -21,3 +21,4 @@ jobs:
           cd /tmp
           /tmp/asitop-wheel/bin/asitop --help
           /tmp/asitop-wheel/bin/python -m asitop.asitop --help
+          /tmp/asitop-wheel/bin/python -m unittest discover -s "$GITHUB_WORKSPACE/tests" -p test_cli.py -v

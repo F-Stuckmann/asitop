@@ -41,6 +41,22 @@ class EntryPointTests(unittest.TestCase):
                 self.assertFalse(any(t.startswith('Core ') for t in titles))
                 self.assertEqual(events[-1]['event'], 'cleanup')
 
+    def test_gpu_allocation_view_and_unavailable_counter_through_both_entry_points(self):
+        for entry in ['console', 'module']:
+            for unavailable in [False, True]:
+                with self.subTest(entry=entry, unavailable=unavailable):
+                    result, events = self.execute(
+                        [], entry, extra_env={'ASITOP_GPU_UNAVAILABLE': str(int(unavailable))})
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    widgets = next(e['widgets'] for e in events if e['event'] == 'display')
+                    ram_index = next(i for i, w in enumerate(widgets)
+                                     if (w['title'] or '').startswith('RAM Usage:'))
+                    gpu = widgets[ram_index + 1]
+                    self.assertEqual(gpu['title'], 'GPU allocated: N/A' if unavailable
+                                     else 'GPU allocated:   3.0/  8.0 GiB')
+                    self.assertEqual(gpu['value'], 0 if unavailable else 37.5)
+                    self.assertEqual(gpu['color'], widgets[ram_index]['color'])
+
     def test_every_option_and_boolean_form_through_both_entry_points(self):
         forms = [([], False), (['--show_cores'], True)]
         forms += [(['--show_cores', value], expected) for value, expected in

@@ -68,7 +68,9 @@ utils.terminate_powermetrics_process = terminate
 utils.parse_powermetrics = reading
 utils.get_soc_info = lambda: {'name': 'Apple M5', 'gpu_core_count': 20,
                               'cpu_max_power': 20, 'gpu_max_power': 20}
-utils.get_ram_metrics_dict = lambda: {'used_GB': 1, 'total_GB': 8, 'free_percent': 12, 'swap_total_GB': 0}
+utils.get_ram_metrics_dict = lambda: {'used_GB': 1, 'total_GB': 8, 'total_bytes': 8 * 2**30, 'free_percent': 12, 'swap_total_GB': 0}
+utils.get_gpu_memory_bytes = lambda: (None if os.environ.get('ASITOP_GPU_UNAVAILABLE') == '1'
+                                      else 3 * 2**30)
 utils.clear_console = lambda: None
 dashing.VSplit.display = display
 dashing.HSplit.display = display

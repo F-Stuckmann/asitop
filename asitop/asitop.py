@@ -21,8 +21,8 @@ args = parser.parse_args()
 
 def main():
     print("\nASITOP - Performance monitoring CLI tool for Apple Silicon")
-    print("You can update ASITOP by running `pip install asitop --upgrade`")
-    print("Get help at `https://github.com/tlkh/asitop`")
+    print("You can update ASITOP by running `pip install --upgrade git+https://github.com/F-Stuckmann/asitop.git`")
+    print("Get help at `https://github.com/F-Stuckmann/asitop`")
     print("P.S. You are recommended to run ASITOP with `sudo asitop`\n")
     print("\n[1/3] Loading ASITOP\n")
     print("\033[?25l")
